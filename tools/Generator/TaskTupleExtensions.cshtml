@@ -1,0 +1,133 @@
+@using RazorLight;
+@using RazorLight.Text;
+@model Int32
+@{
+var ms = Enumerable.ToArray(
+    from arity in Enumerable.Range(2, Model - 1)
+    let ns = Enumerable.Range(1, arity)
+    select new
+    {
+        Arity            = arity,
+        TArgs            = Raw("<" + string.Join(", ", from n in ns select $"T{n}") + ">"),
+        Tuple            = Raw("(" + string.Join(", ", from n in ns select $"T{n}") + ")"),
+        GenericTaskTuple = Raw("(" + string.Join(", ", from n in ns select $"Task<T{n}>") + ")"),
+        TaskTuple        = Raw("(" + string.Join(", ", Enumerable.Repeat("Task", arity)) + ")"),
+        Items            = from n in ns select "Item" + n,
+    });
+}
+using System;
+using System.Runtime.CompilerServices;
+using System.Security;
+using System.Threading.Tasks;
+// ReSharper disable ImpureMethodCallOnReadonlyValueField
+
+namespace TaskTupleAwaiter
+{
+    partial class TaskTupleExtensions
+    {
+        @foreach (var m in ms)
+        {
+<text>
+        #region (@Raw($"Task<T1>..Task<T{m.Arity}>"))
+        public static TupleTaskAwaiter @m.TArgs GetAwaiter @m.TArgs (
+            this @m.GenericTaskTuple tasks) =>
+            new TupleTaskAwaiter @m.TArgs (tasks);
+
+        public struct TupleTaskAwaiter @m.TArgs : ICriticalNotifyCompletion
+        {
+            private readonly @m.GenericTaskTuple _tasks;
+            private readonly TaskAwaiter _whenAllAwaiter;
+
+            public TupleTaskAwaiter(@m.GenericTaskTuple tasks)
+            {
+                _tasks = tasks;
+                _whenAllAwaiter = Task.WhenAll(@Format(m.Items, item => "tasks." + item)).GetAwaiter();
+            }
+
+            public bool IsCompleted => _whenAllAwaiter.IsCompleted;
+
+            public void OnCompleted(Action continuation) =>
+                _whenAllAwaiter.OnCompleted(continuation);
+
+            [SecurityCritical]
+            public void UnsafeOnCompleted(Action continuation) =>
+                _whenAllAwaiter.UnsafeOnCompleted(continuation);
+
+            public @m.Tuple GetResult()
+            {
+                _whenAllAwaiter.GetResult();
+                return (@Format(m.Items, item => $"_tasks.{item}.Result"));
+            }
+        }
+
+        public static TupleConfiguredTaskAwaitable @m.TArgs ConfigureAwait @m.TArgs (
+            this @m.GenericTaskTuple tasks, bool continueOnCapturedContext) =>
+            new TupleConfiguredTaskAwaitable @m.TArgs (tasks, continueOnCapturedContext);
+
+        public struct TupleConfiguredTaskAwaitable @m.TArgs
+        {
+            private readonly @m.GenericTaskTuple _tasks;
+            private readonly bool _continueOnCapturedContext;
+
+            public TupleConfiguredTaskAwaitable(@m.GenericTaskTuple tasks, bool continueOnCapturedContext)
+            {
+                _tasks = tasks;
+                _continueOnCapturedContext = continueOnCapturedContext;
+            }
+
+            public Awaiter GetAwaiter() =>
+                new Awaiter(_tasks, _continueOnCapturedContext);
+
+            public struct Awaiter : ICriticalNotifyCompletion
+            {
+                private readonly @m.GenericTaskTuple _tasks;
+                private readonly ConfiguredTaskAwaitable.ConfiguredTaskAwaiter _whenAllAwaiter;
+
+                public Awaiter(@m.GenericTaskTuple tasks, bool continueOnCapturedContext)
+                {
+                    _tasks = tasks;
+                    _whenAllAwaiter = Task.WhenAll(@Format(m.Items, item => "tasks." + item))
+                        .ConfigureAwait(continueOnCapturedContext).GetAwaiter();
+                }
+
+                public bool IsCompleted => _whenAllAwaiter.IsCompleted;
+
+                public void OnCompleted(Action continuation) =>
+                    _whenAllAwaiter.OnCompleted(continuation);
+
+                [SecurityCritical]
+                public void UnsafeOnCompleted(Action continuation) =>
+                    _whenAllAwaiter.UnsafeOnCompleted(continuation);
+
+                public @m.Tuple GetResult()
+                {
+                    _whenAllAwaiter.GetResult();
+                    return (@Format(m.Items, item => $"_tasks.{item}.Result"));
+                }
+            }
+        }
+        #endregion
+</text>
+        }
+
+        #region Task
+        @foreach (var m in ms)
+        {
+<text>
+        public static TaskAwaiter GetAwaiter(this @m.TaskTuple tasks) =>
+            Task.WhenAll(@Format(m.Items, item => "tasks." + item)).GetAwaiter();
+
+        public static ConfiguredTaskAwaitable ConfigureAwait(this @m.TaskTuple tasks,
+            bool continueOnCapturedContext) => Task.WhenAll(@Format(m.Items, item => "tasks." + item))
+            .ConfigureAwait(continueOnCapturedContext);
+</text>
+        }
+
+        #endregion
+    }
+}
+@functions
+{
+    IRawString Format<T>(IEnumerable<T> items, Func<T, string> f) =>
+        Raw(string.Join(", ", from item in items select f(item)));
+}
